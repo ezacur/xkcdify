@@ -24,7 +24,16 @@ function varargout = xkcdify(hFig, varargin)
 %     Sigma         - longitud de la ondulación (px). Mayor = ondas más largas.
 %     Amplitud      - desplazamiento típico de los píxeles (px).
 %     GrosorLineas  - grosor mínimo de las líneas de datos (0 = no tocar).
-%     FuenteComic   - true para cambiar todas las fuentes a una tipo cómic.
+%     Fuente        - fuente para todos los textos:
+%                     'auto' (por defecto): la primera fuente cómic instalada
+%                       que tenga todos los caracteres de la figura (tildes,
+%                       eñes...), en este orden: xkcd Script, Humor Sans,
+%                       Patrick Hand, Comic Neue, Architects Daughter,
+%                       Comic Relief, Short Stack, Comic Sans MS.
+%                     'ninguna': no cambiar las fuentes.
+%                     o el nombre de cualquier fuente instalada.
+%                   Para instalar las fuentes: instalar_fuentes.
+%     FuenteComic   - false equivale a Fuente = 'ninguna' (compatibilidad).
 %     RetocarEjes   - true para engrosar los ejes y dibujarlos encima (Layer top).
 %     Semilla       - semilla del ruido (mismo valor = misma deformación).
 %     Interfaz      - true abre la interfaz. Por defecto: true si no se pide
@@ -54,6 +63,7 @@ function varargout = xkcdify(hFig, varargin)
     p.addParameter('Sigma',        15,   @(v) isscalar(v) && v > 0);
     p.addParameter('Amplitud',     1.2,  @(v) isscalar(v) && v >= 0);
     p.addParameter('GrosorLineas', 2.5,  @(v) isscalar(v) && v >= 0);
+    p.addParameter('Fuente',       'auto', @(v) ischar(v) || isstring(v));
     p.addParameter('FuenteComic',  true, @(v) isscalar(v));
     p.addParameter('RetocarEjes',  true, @(v) isscalar(v));
     p.addParameter('Semilla',      1,    @(v) isscalar(v) && v >= 0);
@@ -61,15 +71,17 @@ function varargout = xkcdify(hFig, varargin)
     p.addParameter('TipoInterfaz', 'auto', @(v) any(strcmpi(v, {'auto', 'uifigure', 'figure'})));
     p.parse(varargin{:});
     opts = p.Results;
-
-    fuenteComic = buscarFuenteComic();
-    if isempty(fuenteComic)
-        opts.FuenteComic = false;
+    opts.Fuente = char(opts.Fuente);
+    if ~opts.FuenteComic
+        opts.Fuente = 'ninguna';
     end
+
+    instaladas = fuentesComicInstaladas();
 
     %% SIN INTERFAZ: capturar, deformar y devolver la imagen
     if ~opts.Interfaz
-        img = deformar(capturarFigura(hFig, opts, fuenteComic), opts, []);
+        fuente = elegirFuente(hFig, opts.Fuente, instaladas);
+        img = deformar(capturarFigura(hFig, opts, fuente), opts, []);
         if nargout > 0
             varargout{1} = img;
         else
@@ -94,12 +106,16 @@ function varargout = xkcdify(hFig, varargin)
     %   ui.etiqueta(nombre, texto)  texto sobre un slider ('Sigma', ...)
     %   ui.imagen(img)              muestra el resultado
     %   ui.estado(texto)            barra de estado
+    %   ui.infoFuente(texto)        qué fuente se usa y por qué
     titulo = ['xkcdify - ' nombreFigura(hFig)];
-    if isempty(fuenteComic)
-        txtFuente = 'Fuente cómic (no hay ninguna instalada)';
-    else
-        txtFuente = ['Fuente cómic (' fuenteComic ')'];
+
+    % Opciones del desplegable de fuente: textos y valores de opts.Fuente
+    valoresFuente = [{'auto'} instaladas {'ninguna'}];
+    if ~any(strcmpi(valoresFuente, opts.Fuente))
+        valoresFuente = [valoresFuente(1:end-1) {opts.Fuente} {'ninguna'}];
     end
+    textosFuente = [{'Automática (según los caracteres)'} valoresFuente(2:end-1) {'No cambiar la fuente'}];
+    iFuente = find(strcmpi(valoresFuente, opts.Fuente), 1);
 
     tipo = lower(opts.TipoInterfaz);
     if strcmp(tipo, 'auto') && ~hayUifigure()
@@ -146,8 +162,8 @@ function varargout = xkcdify(hFig, varargin)
             g.ColumnWidth = {270, '1x'};
 
             pnl = uipanel(g, 'Title', 'Parámetros');
-            gc = uigridlayout(pnl, [12 1]);
-            gc.RowHeight = [repmat({'fit'}, 1, 11) {'1x'}];
+            gc = uigridlayout(pnl, [14 1]);
+            gc.RowHeight = [repmat({'fit'}, 1, 13) {'1x'}];
 
             lbl.Sigma = uilabel(gc);
             uislider(gc, 'Limits', LIM_SIGMA, 'Value', opts.Sigma, ...
@@ -167,9 +183,11 @@ function varargout = xkcdify(hFig, varargin)
                 'ValueChangingFcn', @(~,e) actualizarEtiquetas('GrosorLineas', e.Value), ...
                 'ValueChangedFcn',  @(s,~) cambiarCaptura('GrosorLineas', s.Value));
 
-            uicheckbox(gc, 'Text', txtFuente, 'Value', opts.FuenteComic, ...
-                'Enable', ~isempty(fuenteComic), ...
-                'ValueChangedFcn', @(s,~) cambiarCaptura('FuenteComic', s.Value));
+            uilabel(gc, 'Text', 'Fuente:');
+            uidropdown(gc, 'Items', textosFuente, 'ItemsData', valoresFuente, ...
+                'Value', valoresFuente{iFuente}, ...
+                'ValueChangedFcn', @(s,~) cambiarCaptura('Fuente', s.Value));
+            lblFuente = uilabel(gc, 'FontColor', [0.4 0.4 0.4], 'WordWrap', 'on');
             uicheckbox(gc, 'Text', 'Retocar ejes (grosor, Layer top)', ...
                 'Value', opts.RetocarEjes, ...
                 'ValueChangedFcn', @(s,~) cambiarCaptura('RetocarEjes', s.Value));
@@ -189,6 +207,7 @@ function varargout = xkcdify(hFig, varargin)
         u.etiqueta = @(nombre, texto) set(lbl.(nombre), 'Text', texto);
         u.imagen   = @(img) set(imgResultado, 'ImageSource', uint8(round(255 * img)));
         u.estado   = @(texto) set(lblEstado, 'Text', texto);
+        u.infoFuente = @(texto) set(lblFuente, 'Text', texto);
     end
 
     function u = crearFigureClasica()
@@ -211,12 +230,12 @@ function varargout = xkcdify(hFig, varargin)
         sldGrosor = crearSlider(pnl, LIM_GROSOR, opts.GrosorLineas, [0.5 1], ...
             @(v) cambiarCaptura('GrosorLineas', v), @(v) actualizarEtiquetas('GrosorLineas', v));
 
-        chkFuente = uicontrol('Parent', pnl, 'Style', 'checkbox', 'String', txtFuente, ...
-            'Value', opts.FuenteComic, 'BackgroundColor', fondo, ...
-            'Callback', @(s,~) cambiarCaptura('FuenteComic', logical(get(s, 'Value'))));
-        if isempty(fuenteComic)
-            set(chkFuente, 'Enable', 'off');
-        end
+        lblTituloFuente = texto('Fuente:');
+        popFuente = uicontrol('Parent', pnl, 'Style', 'popupmenu', 'String', textosFuente, ...
+            'Value', iFuente, ...
+            'Callback', @(s,~) cambiarCaptura('Fuente', valoresFuente{get(s, 'Value')}));
+        lblFuente = texto('');
+        set(lblFuente, 'ForegroundColor', [0.4 0.4 0.4]);
         chkEjes = uicontrol('Parent', pnl, 'Style', 'checkbox', ...
             'String', 'Retocar ejes (grosor, Layer top)', ...
             'Value', opts.RetocarEjes, 'BackgroundColor', fondo, ...
@@ -236,7 +255,8 @@ function varargout = xkcdify(hFig, varargin)
 
         % Controles de arriba abajo: {control, alto, separación anterior}
         filas = {lbl.Sigma, 18, 4;  sldSigma, 20, 0;  lbl.Amplitud, 18, 10;  sldAmplitud, 20, 0;
-                 lbl.GrosorLineas, 18, 10;  sldGrosor, 20, 0;  chkFuente, 22, 12;  chkEjes, 22, 4;
+                 lbl.GrosorLineas, 18, 10;  sldGrosor, 20, 0;
+                 lblTituloFuente, 18, 12;  popFuente, 22, 0;  lblFuente, 30, 2;  chkEjes, 22, 6;
                  btnSemilla, 26, 12;  btnRecapturar, 26, 6;  btnExportar, 26, 6;  lblEstado, 40, 16};
 
         try
@@ -250,6 +270,7 @@ function varargout = xkcdify(hFig, varargin)
         u.etiqueta = @(nombre, t) set(lbl.(nombre), 'String', t);
         u.imagen   = @mostrarImagen;
         u.estado   = @(t) set(lblEstado, 'String', t);
+        u.infoFuente = @(t) set(lblFuente, 'String', t);
 
         function colocar()
             pos = get(fig, 'Position');
@@ -339,7 +360,10 @@ function varargout = xkcdify(hFig, varargin)
             ui.estado('La figura original ya no existe.');
             return
         end
-        frame = capturarFigura(hFig, opts, fuenteComic);
+        % La fuente se elige en cada captura: los textos pueden haber cambiado
+        [fuente, info] = elegirFuente(hFig, opts.Fuente, instaladas);
+        ui.infoFuente(info);
+        frame = capturarFigura(hFig, opts, fuente);
     end
 
     function distorsionar()
@@ -355,9 +379,10 @@ function varargout = xkcdify(hFig, varargin)
 end
 
 %% FUNCIONES LOCALES
-function frame = capturarFigura(hFig, opts, fuenteComic)
+function frame = capturarFigura(hFig, opts, fuente)
 % 1. Aplicar retoques temporales, 2. capturar, 3. restaurar
-    cambios = aplicarRetoques(hFig, opts, fuenteComic);
+% fuente: nombre de la fuente a aplicar ('' = no cambiar)
+    cambios = aplicarRetoques(hFig, opts, fuente);
     restaurar = onCleanup(@() restaurarPropiedades(cambios));
     drawnow;
     fr = getframe(hFig);
@@ -465,14 +490,14 @@ function nombre = nombreFigura(hFig)
     end
 end
 
-function cambios = aplicarRetoques(hFig, opts, fuenteComic)
+function cambios = aplicarRetoques(hFig, opts, fuente)
 % Aplica los retoques y devuelve lo necesario para deshacerlos:
 % cada fila es {objeto, propiedad, valor original, modo original}
     cambios = cell(0, 4);
 
-    if opts.FuenteComic && ~isempty(fuenteComic)
+    if ~isempty(fuente)
         cambios = fijar(cambios, findall(hFig, '-property', 'FontName'), ...
-            'FontName', fuenteComic);
+            'FontName', fuente);
     end
 
     if opts.RetocarEjes
@@ -533,20 +558,98 @@ function restaurarPropiedades(cambios)
     end
 end
 
-function nombre = buscarFuenteComic()
-% Primera fuente tipo cómic instalada ('' si no hay ninguna)
-    candidatas = {'Humor Sans', 'xkcd Script', 'xkcd', 'Comic Neue', 'Comic Sans MS'};
+function nombres = fuentesComicInstaladas()
+% Fuentes cómic instaladas, en orden de preferencia (instalar_fuentes
+% instala las primeras)
+    candidatas = {'xkcd Script', 'Humor Sans', 'Patrick Hand', 'Comic Neue', ...
+        'Architects Daughter', 'Comic Relief', 'Short Stack', 'Comic Sans MS'};
     try
         disponibles = lower(listfonts);
     catch
         disponibles = {};   % Octave no tiene listfonts
     end
-    idx = find(ismember(lower(candidatas), disponibles), 1);
-    if isempty(idx)
-        nombre = '';
-    else
-        nombre = candidatas{idx};
+    nombres = candidatas(ismember(lower(candidatas), disponibles));
+end
+
+function [fuente, info] = elegirFuente(hFig, pedida, instaladas)
+% Fuente a aplicar ('' = no cambiar) y una explicación para la interfaz.
+% Con 'auto', la primera instalada que tenga todos los caracteres de la
+% figura: Humor Sans, por ejemplo, no tiene tildes ni eñes.
+    fuente = '';
+    if strcmpi(pedida, 'ninguna')
+        info = 'Fuentes sin cambiar.';
+        return
     end
+    texto = textosFigura(hFig);
+
+    if ~strcmpi(pedida, 'auto')
+        fuente = pedida;
+        faltan = caracteresQueFaltan(fuente, texto);
+        if isempty(faltan)
+            info = ['Usando ' fuente '.'];
+        else
+            info = sprintf('Usando %s. Le faltan: %s', fuente, faltan);
+        end
+        return
+    end
+
+    if isempty(instaladas)
+        info = 'No hay ninguna fuente cómic instalada (ver instalar_fuentes).';
+        return
+    end
+    descartadas = {};
+    for k = 1:numel(instaladas)
+        faltan = caracteresQueFaltan(instaladas{k}, texto);
+        if isempty(faltan)
+            fuente = instaladas{k};
+            break
+        end
+        descartadas{end+1} = sprintf('%s no tiene: %s', instaladas{k}, faltan); %#ok<AGROW>
+    end
+    if isempty(fuente)
+        fuente = instaladas{1};
+        info = sprintf('Usando %s, aunque ninguna tiene todos los caracteres (%s).', ...
+            fuente, strjoin(descartadas, '; '));
+    elseif isempty(descartadas)
+        info = ['Usando ' fuente '.'];
+    else
+        info = sprintf('Usando %s (%s).', fuente, strjoin(descartadas, '; '));
+    end
+end
+
+function faltan = caracteresQueFaltan(fuente, texto)
+% Caracteres de texto que la fuente no tiene, separados por espacios.
+% Usa Java (java.awt.Font); sin Java (Octave) no se puede saber: ''.
+    faltan = '';
+    if ~exist('usejava', 'file') || ~usejava('awt')
+        return
+    end
+    f = java.awt.Font(fuente, java.awt.Font.PLAIN, 12);
+    c = unique(texto(texto > ' '));
+    sinGlifo = false(size(c));
+    for k = 1:numel(c)
+        sinGlifo(k) = ~f.canDisplay(c(k));
+    end
+    faltan = strjoin(cellstr(c(sinGlifo)')', ' ');
+end
+
+function texto = textosFigura(hFig)
+% Todo el texto de la figura: textos (títulos, etiquetas, anotaciones),
+% leyendas y marcas de ejes y colorbars
+    partes = {};
+    pares = {'text', 'String'; 'legend', 'String'; 'axes', 'XTickLabel'; ...
+             'axes', 'YTickLabel'; 'axes', 'ZTickLabel'; 'colorbar', 'TickLabels'};
+    for k = 1:size(pares, 1)
+        objs = findall(hFig, 'Type', pares{k, 1});
+        for j = 1:numel(objs)
+            try
+                s = cellstr(get(objs(j), pares{k, 2}));
+                partes = [partes s(:)']; %#ok<AGROW>
+            catch
+            end
+        end
+    end
+    texto = strjoin(partes, ' ');
 end
 
 function v = limitar(v, lim)

@@ -32,12 +32,12 @@
 % * La interfaz moderna usa |uifigure| (R2021b o posterior). En versiones
 %   anteriores, en Octave o si |uifigure| falla, se usa automáticamente una
 %   interfaz clásica con |figure| y |uicontrol| (ver sección 2).
-% * Opcional: la fuente *Humor Sans*, la letra de xkcd. Si está instalada
-%   (para todos los usuarios, en |C:\Windows\Fonts|), |xkcdify| la usa
-%   automáticamente. Si no, prueba con xkcd Script, xkcd, Comic Neue y
-%   Comic Sans MS, en ese orden.
+% * Opcional, pero recomendado: una fuente cómic. La forma más sencilla de
+%   instalarlas es |instalar_fuentes| (ver sección 4.4). Estas son las que
+%   |xkcdify| reconoce y cuáles tienes instaladas:
 
-fuentes = {'Humor Sans', 'xkcd Script', 'xkcd', 'Comic Neue', 'Comic Sans MS'};
+fuentes = {'xkcd Script', 'Humor Sans', 'Patrick Hand', 'Comic Neue', ...
+    'Architects Daughter', 'Comic Relief', 'Short Stack', 'Comic Sans MS'};
 instaladas = fuentes(ismember(lower(fuentes), lower(listfonts)))
 
 %% 1. Una figura normal
@@ -69,7 +69,9 @@ title('Tres ondas');
 % * *Grosor mínimo de líneas*: engrosa las líneas de datos que sean más
 %   finas que este valor (0 = no tocarlas). Las líneas finas se ven mal al
 %   deformarlas.
-% * *Fuente cómic*: cambia todos los textos a la fuente cómic encontrada.
+% * *Fuente*: desplegable con la fuente de los textos. *Automática* elige
+%   la primera fuente cómic instalada que tenga todos los caracteres de la
+%   figura; debajo se explica cuál ha elegido y por qué (ver sección 4.4).
 % * *Retocar ejes*: engrosa los ejes (mínimo 1.5) y los dibuja encima de
 %   los datos (|Layer = 'top'|).
 % * *Nueva semilla*: sortea otro patrón de ruido.
@@ -129,7 +131,7 @@ imshow(img, 'Border', 'tight');
 % <tr><td>Sigma</td><td>15</td><td>Longitud de la ondulación (px)</td></tr>
 % <tr><td>Amplitud</td><td>1.2</td><td>Desplazamiento típico de los píxeles (px)</td></tr>
 % <tr><td>GrosorLineas</td><td>2.5</td><td>Grosor mínimo de las líneas de datos (0 = no tocar)</td></tr>
-% <tr><td>FuenteComic</td><td>true</td><td>Cambiar los textos a la fuente cómic</td></tr>
+% <tr><td>Fuente</td><td>'auto'</td><td>'auto' (la primera fuente cómic con todos los caracteres), 'ninguna' (no cambiar) o el nombre de una fuente</td></tr>
 % <tr><td>RetocarEjes</td><td>true</td><td>Engrosar los ejes y dibujarlos encima</td></tr>
 % <tr><td>Semilla</td><td>1</td><td>Semilla del ruido</td></tr>
 % <tr><td>Interfaz</td><td>según la salida</td><td>true abre la interfaz; por defecto, solo si no se pide salida</td></tr>
@@ -160,7 +162,7 @@ mostrar(imgs, compose('Sigma = %d px', sigmas));
 % Los retoques hacen que el resultado parezca de verdad un dibujo. Aquí
 % el mismo efecto con y sin ellos:
 
-sinRetoques = xkcdify(hFig, 'FuenteComic', false, 'RetocarEjes', false, 'GrosorLineas', 0);
+sinRetoques = xkcdify(hFig, 'Fuente', 'ninguna', 'RetocarEjes', false, 'GrosorLineas', 0);
 conRetoques = xkcdify(hFig);
 mostrar({sinRetoques, conRetoques}, {'Sin retoques', 'Con retoques (por defecto)'});
 
@@ -169,6 +171,57 @@ mostrar({sinRetoques, conRetoques}, {'Sin retoques', 'Con retoques (por defecto)
 
 ax = findobj(hFig, 'Type', 'axes');
 fprintf('Fuente de los ejes: %s, grosor: %.1f\n', ax.FontName, ax.LineWidth);
+
+%% 4.4 Fuente: elección automática
+% Con |Fuente = 'auto'| (por defecto), |xkcdify| recoge todos los textos de
+% la figura (títulos, etiquetas, leyendas y marcas de los ejes) y usa la
+% primera fuente cómic instalada que los pueda dibujar todos, en este
+% orden:
+%
+% <html>
+% <table border="1" cellpadding="4" style="border-collapse:collapse">
+% <tr><th>Fuente</th><th>Estilo</th><th>Tildes y eñes</th><th>Licencia</th></tr>
+% <tr><td>xkcd Script</td><td>la letra real de xkcd, con minúsculas</td><td>sí</td><td>CC BY-NC 3.0 (no comercial)</td></tr>
+% <tr><td>Humor Sans</td><td>letra de xkcd, solo mayúsculas</td><td><b>no</b></td><td>gratuita</td></tr>
+% <tr><td>Patrick Hand</td><td>manuscrita estrecha, muy legible</td><td>sí</td><td>SIL OFL</td></tr>
+% <tr><td>Comic Neue</td><td>Comic Sans "bien hecha"</td><td>sí</td><td>SIL OFL</td></tr>
+% <tr><td>Architects Daughter</td><td>manuscrita, estilo de arquitecto</td><td>sí</td><td>SIL OFL</td></tr>
+% <tr><td>Comic Relief</td><td>parecida a Comic Sans</td><td>sí</td><td>SIL OFL</td></tr>
+% <tr><td>Short Stack</td><td>redondeada y ancha</td><td>sí</td><td>SIL OFL</td></tr>
+% <tr><td>Comic Sans MS</td><td>viene con Windows</td><td>sí</td><td>-</td></tr>
+% </table>
+% </html>
+%
+% Así, un título con una "ñ" no sale mutilado con Humor Sans: se salta a la
+% siguiente fuente que sí la tenga. Aquí, el mismo título forzando Humor
+% Sans y en automático (el resultado depende de las fuentes instaladas):
+
+hTitulo = get(get(hFig, 'CurrentAxes'), 'Title');
+tituloOriginal = hTitulo.String;
+hTitulo.String = 'Año y señal';
+forzada = xkcdify(hFig, 'Fuente', 'Humor Sans');
+automatica = xkcdify(hFig);
+hTitulo.String = tituloOriginal;
+mostrar({forzada, automatica}, {'Forzando Humor Sans', 'Automática'}, 1:60, 170:470);
+
+%%
+% En la interfaz, el desplegable *Fuente* permite elegirla a mano, y debajo
+% se explica la elección, por ejemplo: _Usando Comic Sans MS (Humor Sans no
+% tiene: ñ)_.
+%
+% *Instalar las fuentes.* |instalar_fuentes| descarga las fuentes de su
+% origen oficial y las instala (en Windows, para todos los usuarios: pide
+% permiso de administrador). Después hay que reiniciar MATLAB.
+%
+%   instalar_fuentes                      % xkcd Script, Patrick Hand y Comic Neue
+%   instalar_fuentes({'Humor Sans'})      % otras
+%   instalar_fuentes('todas')
+%   instalar_fuentes('todas', 'Simular', true)   % solo descarga y comprueba
+%
+% A mano: descarga el |.ttf| y, en Windows, clic derecho, *Instalar para
+% todos los usuarios* (con "Instalar" a secas MATLAB no la ve); en macOS,
+% doble clic; en Linux, cópialo a |~/.local/share/fonts| y ejecuta
+% |fc-cache -f|.
 
 %% 5. Semilla: resultados reproducibles
 % El ruido se genera a partir de |Semilla|, así que la misma semilla da
@@ -258,11 +311,10 @@ title('Campo de desplazamiento (Sigma = 15, Amplitud = 1.2)');
 % * La resolución es la de la figura en pantalla.
 % * Humor Sans solo tiene mayúsculas: todos los textos salen en
 %   mayúsculas, como en xkcd.
-% * Humor Sans *no tiene tildes ni eñes*: "gráfica" sale como "GRFICA".
-%   Escribe los textos sin tildes o desactiva *Fuente cómic* (Comic Sans
-%   MS sí las tiene).
-% * MATLAB solo ve las fuentes instaladas para todos los usuarios, y hay
-%   que reiniciarlo después de instalar una fuente.
+% * La detección de caracteres que faltan usa Java: en Octave no está
+%   disponible y se usa la primera fuente instalada sin comprobar.
+% * En Windows, MATLAB solo ve las fuentes instaladas para todos los
+%   usuarios, y hay que reiniciarlo después de instalar una fuente.
 
 %% Limpieza
 % Cerramos todas las figuras del tutorial, también las ocultas.
@@ -272,8 +324,8 @@ close all
 %% Funciones auxiliares del tutorial
 % |figuraNueva| crea una figura blanca del tamaño indicado, cierra las que
 % creó antes y oculta las demás. |mostrar| enseña en fila el mismo recorte
-% de varias imágenes, a tamaño real (las diferencias son de pocos píxeles
-% y al reducir se perderían).
+% de varias imágenes (por defecto, una zona de las curvas), a tamaño real:
+% las diferencias son de pocos píxeles y al reducir se perderían.
 
 function h = figuraNueva(ancho, alto)
     close(findall(groot, 'Type', 'figure', 'Tag', 'tutorialXkcdify'));
@@ -281,9 +333,11 @@ function h = figuraNueva(ancho, alto)
     h = figure('Color', 'w', 'Position', [100 100 ancho alto], 'Tag', 'tutorialXkcdify');
 end
 
-function mostrar(imgs, titulos)
-    filas = 60:290;
-    cols  = 40:330;
+function mostrar(imgs, titulos, filas, cols)
+    if nargin < 3
+        filas = 60:290;
+        cols  = 40:330;
+    end
     figuraNueva((numel(cols) + 20) * numel(imgs), numel(filas) + 40);
     t = tiledlayout(1, numel(imgs), 'TileSpacing', 'tight', 'Padding', 'tight');
     for k = 1:numel(imgs)
