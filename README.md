@@ -103,6 +103,10 @@ Descarga el `.ttf` desde los enlaces de la tabla y:
 
 Y reinicia MATLAB. Para comprobarlo: `any(strcmpi(listfonts, 'xkcd Script'))`.
 
+## Ideas abiertas
+
+¿Llevarlo fuera de MATLAB, a una web que convierta cualquier SVG o PNG en dibujo de servilleta? Las ideas están en [`TODO.md`](TODO.md), libres para quien quiera hacerlas.
+
 ## Documentación
 
 El tutorial completo, con ejemplos de cada parámetro, está en [`doc/tutorial_xkcdify.html`](doc/tutorial_xkcdify.html): es un único fichero; descárgalo y ábrelo en el navegador. Se genera desde [`tutorial_xkcdify.m`](tutorial_xkcdify.m) con `build_tutorial`.
