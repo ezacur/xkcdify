@@ -14,7 +14,11 @@ function varargout = xkcdify(hFig, varargin)
 %   rango de los sliders.
 %
 %   hGui = xkcdify(hFig, 'Interfaz', true, ...) abre la interfaz y devuelve
-%   su uifigure.
+%   su ventana.
+%
+%   La interfaz usa uifigure (MATLAB R2021b o posterior). Si no está
+%   disponible (MATLAB anterior u Octave) o falla, usa una figure clásica con
+%   uicontrol. No requiere ninguna toolbox.
 %
 %   Parámetros:
 %     Sigma         - longitud de la ondulación (px). Mayor = ondas más largas.
@@ -25,6 +29,8 @@ function varargout = xkcdify(hFig, varargin)
 %     Semilla       - semilla del ruido (mismo valor = misma deformación).
 %     Interfaz      - true abre la interfaz. Por defecto: true si no se pide
 %                     salida, false si se pide (img = xkcdify(...)).
+%     TipoInterfaz  - 'auto' (por defecto: uifigure si se puede, si no
+%                     figure), 'uifigure' o 'figure'.
 %
 %   Ejemplo:
 %     hFig = figure('Color','w');
@@ -52,6 +58,7 @@ function varargout = xkcdify(hFig, varargin)
     p.addParameter('RetocarEjes',  true, @(v) isscalar(v));
     p.addParameter('Semilla',      1,    @(v) isscalar(v) && v >= 0);
     p.addParameter('Interfaz',     nargout == 0, @(v) isscalar(v));
+    p.addParameter('TipoInterfaz', 'auto', @(v) any(strcmpi(v, {'auto', 'uifigure', 'figure'})));
     p.parse(varargin{:});
     opts = p.Results;
 
@@ -82,67 +89,191 @@ function varargout = xkcdify(hFig, varargin)
     result  = [];   % imagen final
 
     %% INTERFAZ
-    if isempty(hFig.Number)
-        nombreFig = hFig.Name;
-    else
-        nombreFig = sprintf('Figura %d', hFig.Number);
-    end
-    hGui = uifigure('Name', ['xkcdify - ' nombreFig], ...
-        'Position', [100 100 1000 560]);
-    g = uigridlayout(hGui, [1 2]);
-    g.ColumnWidth = {270, '1x'};
-
-    pnl = uipanel(g, 'Title', 'Parámetros');
-    gc = uigridlayout(pnl, [12 1]);
-    gc.RowHeight = [repmat({'fit'}, 1, 11) {'1x'}];
-
-    lblSigma = uilabel(gc);
-    sldSigma = uislider(gc, 'Limits', LIM_SIGMA, 'Value', opts.Sigma, ...
-        'MajorTicks', [2 10 20 30 40], 'MinorTicks', 2:2:40, ...
-        'ValueChangingFcn', @(~,e) cambiarDistorsion('Sigma', e.Value), ...
-        'ValueChangedFcn',  @(s,~) cambiarDistorsion('Sigma', s.Value));
-
-    lblAmplitud = uilabel(gc);
-    sldAmplitud = uislider(gc, 'Limits', LIM_AMPLITUD, 'Value', opts.Amplitud, ...
-        'MajorTicks', 0:5, 'MinorTicks', 0:0.25:5, ...
-        'ValueChangingFcn', @(~,e) cambiarDistorsion('Amplitud', e.Value), ...
-        'ValueChangedFcn',  @(s,~) cambiarDistorsion('Amplitud', s.Value));
-
-    lblGrosor = uilabel(gc);
-    sldGrosor = uislider(gc, 'Limits', LIM_GROSOR, 'Value', opts.GrosorLineas, ...
-        'MajorTicks', 0:6, 'MinorTicks', 0:0.5:6, ...
-        'ValueChangingFcn', @(~,e) actualizarEtiquetas('GrosorLineas', e.Value), ...
-        'ValueChangedFcn',  @(s,~) cambiarCaptura('GrosorLineas', s.Value));
-
+    % ui ofrece lo mismo con uifigure o con figure clásica:
+    %   ui.fig                      ventana
+    %   ui.etiqueta(nombre, texto)  texto sobre un slider ('Sigma', ...)
+    %   ui.imagen(img)              muestra el resultado
+    %   ui.estado(texto)            barra de estado
+    titulo = ['xkcdify - ' nombreFigura(hFig)];
     if isempty(fuenteComic)
         txtFuente = 'Fuente cómic (no hay ninguna instalada)';
     else
         txtFuente = ['Fuente cómic (' fuenteComic ')'];
     end
-    chkFuente = uicheckbox(gc, 'Text', txtFuente, 'Value', opts.FuenteComic, ...
-        'Enable', ~isempty(fuenteComic), ...
-        'ValueChangedFcn', @(s,~) cambiarCaptura('FuenteComic', s.Value));
-    uicheckbox(gc, 'Text', 'Retocar ejes (grosor, Layer top)', ...
-        'Value', opts.RetocarEjes, ...
-        'ValueChangedFcn', @(s,~) cambiarCaptura('RetocarEjes', s.Value));
 
-    uibutton(gc, 'Text', 'Nueva semilla', 'ButtonPushedFcn', @(~,~) nuevaSemilla());
-    uibutton(gc, 'Text', 'Recapturar figura', 'ButtonPushedFcn', @(~,~) cambiarCaptura());
-    uibutton(gc, 'Text', 'Exportar...', 'ButtonPushedFcn', @(~,~) exportar());
-    lblEstado = uilabel(gc, 'FontColor', [0.4 0.4 0.4], 'WordWrap', 'on');
+    tipo = lower(opts.TipoInterfaz);
+    if strcmp(tipo, 'auto') && ~hayUifigure()
+        tipo = 'figure';
+    end
+    ui = [];
+    if ~strcmp(tipo, 'figure')
+        try
+            ui = crearUifigure();
+        catch err
+            if strcmp(tipo, 'uifigure')
+                rethrow(err);
+            end
+            warning('xkcdify:uifigure', ...
+                'No se pudo crear la interfaz con uifigure (%s). Se usa figure.', err.message);
+        end
+    end
+    if isempty(ui)
+        ui = crearFigureClasica();
+    end
 
-    imgResultado = uiimage(g, 'ScaleMethod', 'scaledown');
-
-    % Cerrar la interfaz si se cierra la figura original
-    lst = addlistener(hFig, 'ObjectBeingDestroyed', @(~,~) delete(hGui));
-    hGui.CloseRequestFcn = @(s,~) cerrar(s);
+    % Cerrar la interfaz si se cierra la figura original (en Octave no hay
+    % este evento: los callbacks comprueban que la figura siga existiendo)
+    lst = [];
+    try
+        lst = addlistener(hFig, 'ObjectBeingDestroyed', @(~,~) cerrar());
+    catch
+    end
+    set(ui.fig, 'CloseRequestFcn', @(~,~) cerrar());
 
     actualizarEtiquetas();
     capturar();
     distorsionar();
 
     if nargout > 0
-        varargout{1} = hGui;
+        varargout{1} = ui.fig;
+    end
+
+    %% CONSTRUCCIÓN DE LA INTERFAZ
+    function u = crearUifigure()
+        hGui = uifigure('Name', titulo, 'Position', [100 100 1000 560]);
+        try
+            g = uigridlayout(hGui, [1 2]);
+            g.ColumnWidth = {270, '1x'};
+
+            pnl = uipanel(g, 'Title', 'Parámetros');
+            gc = uigridlayout(pnl, [12 1]);
+            gc.RowHeight = [repmat({'fit'}, 1, 11) {'1x'}];
+
+            lbl.Sigma = uilabel(gc);
+            uislider(gc, 'Limits', LIM_SIGMA, 'Value', opts.Sigma, ...
+                'MajorTicks', [2 10 20 30 40], 'MinorTicks', 2:2:40, ...
+                'ValueChangingFcn', @(~,e) cambiarDistorsion('Sigma', e.Value), ...
+                'ValueChangedFcn',  @(s,~) cambiarDistorsion('Sigma', s.Value));
+
+            lbl.Amplitud = uilabel(gc);
+            uislider(gc, 'Limits', LIM_AMPLITUD, 'Value', opts.Amplitud, ...
+                'MajorTicks', 0:5, 'MinorTicks', 0:0.25:5, ...
+                'ValueChangingFcn', @(~,e) cambiarDistorsion('Amplitud', e.Value), ...
+                'ValueChangedFcn',  @(s,~) cambiarDistorsion('Amplitud', s.Value));
+
+            lbl.GrosorLineas = uilabel(gc);
+            uislider(gc, 'Limits', LIM_GROSOR, 'Value', opts.GrosorLineas, ...
+                'MajorTicks', 0:6, 'MinorTicks', 0:0.5:6, ...
+                'ValueChangingFcn', @(~,e) actualizarEtiquetas('GrosorLineas', e.Value), ...
+                'ValueChangedFcn',  @(s,~) cambiarCaptura('GrosorLineas', s.Value));
+
+            uicheckbox(gc, 'Text', txtFuente, 'Value', opts.FuenteComic, ...
+                'Enable', ~isempty(fuenteComic), ...
+                'ValueChangedFcn', @(s,~) cambiarCaptura('FuenteComic', s.Value));
+            uicheckbox(gc, 'Text', 'Retocar ejes (grosor, Layer top)', ...
+                'Value', opts.RetocarEjes, ...
+                'ValueChangedFcn', @(s,~) cambiarCaptura('RetocarEjes', s.Value));
+
+            uibutton(gc, 'Text', 'Nueva semilla', 'ButtonPushedFcn', @(~,~) nuevaSemilla());
+            uibutton(gc, 'Text', 'Recapturar figura', 'ButtonPushedFcn', @(~,~) cambiarCaptura());
+            uibutton(gc, 'Text', 'Exportar...', 'ButtonPushedFcn', @(~,~) exportar());
+            lblEstado = uilabel(gc, 'FontColor', [0.4 0.4 0.4], 'WordWrap', 'on');
+
+            imgResultado = uiimage(g, 'ScaleMethod', 'scaledown');
+        catch err
+            delete(hGui);
+            rethrow(err);
+        end
+
+        u.fig      = hGui;
+        u.etiqueta = @(nombre, texto) set(lbl.(nombre), 'Text', texto);
+        u.imagen   = @(img) set(imgResultado, 'ImageSource', uint8(round(255 * img)));
+        u.estado   = @(texto) set(lblEstado, 'Text', texto);
+    end
+
+    function u = crearFigureClasica()
+        % HandleVisibility off: que plot() y gcf no apunten a la interfaz
+        fig = figure('Name', titulo, 'NumberTitle', 'off', 'MenuBar', 'none', ...
+            'ToolBar', 'none', 'HandleVisibility', 'off', 'IntegerHandle', 'off', ...
+            'Position', [100 100 1000 560]);
+        pnl = uipanel('Parent', fig, 'Title', 'Parámetros', 'Units', 'pixels');
+        fondo = get(pnl, 'BackgroundColor');
+        texto = @(t) uicontrol('Parent', pnl, 'Style', 'text', 'String', t, ...
+            'HorizontalAlignment', 'left', 'BackgroundColor', fondo);
+
+        lbl.Sigma = texto('');
+        sldSigma = crearSlider(pnl, LIM_SIGMA, opts.Sigma, [1 5], ...
+            @(v) cambiarDistorsion('Sigma', v), @(v) cambiarDistorsion('Sigma', v));
+        lbl.Amplitud = texto('');
+        sldAmplitud = crearSlider(pnl, LIM_AMPLITUD, opts.Amplitud, [0.05 0.5], ...
+            @(v) cambiarDistorsion('Amplitud', v), @(v) cambiarDistorsion('Amplitud', v));
+        lbl.GrosorLineas = texto('');
+        sldGrosor = crearSlider(pnl, LIM_GROSOR, opts.GrosorLineas, [0.5 1], ...
+            @(v) cambiarCaptura('GrosorLineas', v), @(v) actualizarEtiquetas('GrosorLineas', v));
+
+        chkFuente = uicontrol('Parent', pnl, 'Style', 'checkbox', 'String', txtFuente, ...
+            'Value', opts.FuenteComic, 'BackgroundColor', fondo, ...
+            'Callback', @(s,~) cambiarCaptura('FuenteComic', logical(get(s, 'Value'))));
+        if isempty(fuenteComic)
+            set(chkFuente, 'Enable', 'off');
+        end
+        chkEjes = uicontrol('Parent', pnl, 'Style', 'checkbox', ...
+            'String', 'Retocar ejes (grosor, Layer top)', ...
+            'Value', opts.RetocarEjes, 'BackgroundColor', fondo, ...
+            'Callback', @(s,~) cambiarCaptura('RetocarEjes', logical(get(s, 'Value'))));
+
+        btnSemilla = uicontrol('Parent', pnl, 'Style', 'pushbutton', ...
+            'String', 'Nueva semilla', 'Callback', @(~,~) nuevaSemilla());
+        btnRecapturar = uicontrol('Parent', pnl, 'Style', 'pushbutton', ...
+            'String', 'Recapturar figura', 'Callback', @(~,~) cambiarCaptura());
+        btnExportar = uicontrol('Parent', pnl, 'Style', 'pushbutton', ...
+            'String', 'Exportar...', 'Callback', @(~,~) exportar());
+        lblEstado = texto('');
+        set(lblEstado, 'ForegroundColor', [0.4 0.4 0.4]);
+
+        ax = axes('Parent', fig, 'Units', 'pixels', 'Visible', 'off');
+        hImg = [];
+
+        % Controles de arriba abajo: {control, alto, separación anterior}
+        filas = {lbl.Sigma, 18, 4;  sldSigma, 20, 0;  lbl.Amplitud, 18, 10;  sldAmplitud, 20, 0;
+                 lbl.GrosorLineas, 18, 10;  sldGrosor, 20, 0;  chkFuente, 22, 12;  chkEjes, 22, 4;
+                 btnSemilla, 26, 12;  btnRecapturar, 26, 6;  btnExportar, 26, 6;  lblEstado, 40, 16};
+
+        try
+            set(fig, 'SizeChangedFcn', @(~,~) colocar());
+        catch
+            set(fig, 'ResizeFcn', @(~,~) colocar());   % versiones antiguas
+        end
+        colocar();
+
+        u.fig      = fig;
+        u.etiqueta = @(nombre, t) set(lbl.(nombre), 'String', t);
+        u.imagen   = @mostrarImagen;
+        u.estado   = @(t) set(lblEstado, 'String', t);
+
+        function colocar()
+            pos = get(fig, 'Position');
+            ancho = 270;
+            m = 8;
+            set(pnl, 'Position', [m m ancho max(pos(4) - 2*m, 1)]);
+            set(ax, 'Position', [ancho + 2*m, m, max(pos(3) - ancho - 3*m, 1), max(pos(4) - 2*m, 1)]);
+            y = pos(4) - 2*m - 20;   % debajo del título del panel
+            for k = 1:size(filas, 1)
+                y = y - filas{k, 3} - filas{k, 2};
+                set(filas{k, 1}, 'Position', [10 y ancho - 24 filas{k, 2}]);
+            end
+        end
+
+        function mostrarImagen(img)
+            if isempty(hImg) || ~isequal(size(get(hImg, 'CData')), size(img))
+                delete(hImg);
+                hImg = image('Parent', ax, 'CData', img);
+                set(ax, 'YDir', 'reverse', 'DataAspectRatio', [1 1 1], 'Visible', 'off', ...
+                    'XLim', [0.5 size(img, 2) + 0.5], 'YLim', [0.5 size(img, 1) + 0.5]);
+            else
+                set(hImg, 'CData', img);
+            end
+        end
     end
 
     %% CALLBACKS
@@ -172,33 +303,42 @@ function varargout = xkcdify(hFig, varargin)
         if nargin > 0
             opts.(nombre) = valor;
         end
-        lblSigma.Text    = sprintf('Sigma (longitud de onda): %.1f px', opts.Sigma);
-        lblAmplitud.Text = sprintf('Amplitud (temblor): %.2f px', opts.Amplitud);
+        ui.etiqueta('Sigma', sprintf('Sigma (longitud de onda): %.1f px', opts.Sigma));
+        ui.etiqueta('Amplitud', sprintf('Amplitud (temblor): %.2f px', opts.Amplitud));
         if opts.GrosorLineas > 0
-            lblGrosor.Text = sprintf('Grosor mínimo de líneas: %.1f', opts.GrosorLineas);
+            ui.etiqueta('GrosorLineas', sprintf('Grosor mínimo de líneas: %.1f', opts.GrosorLineas));
         else
-            lblGrosor.Text = 'Grosor mínimo de líneas: sin cambios';
+            ui.etiqueta('GrosorLineas', 'Grosor mínimo de líneas: sin cambios');
         end
     end
 
     function exportar()
         [f, d] = uiputfile({'*.png', 'PNG'; '*.jpg', 'JPEG'; '*.tif', 'TIFF'}, ...
             'Exportar imagen xkcd', 'xkcd.png');
-        figure(hGui);   % uiputfile deja la interfaz detrás
+        figure(ui.fig);   % uiputfile deja la interfaz detrás
         if isequal(f, 0)
             return
         end
         imwrite(result, fullfile(d, f));
-        lblEstado.Text = ['Exportado: ' fullfile(d, f)];
+        ui.estado(['Exportado: ' fullfile(d, f)]);
     end
 
-    function cerrar(s)
-        delete(lst);
-        delete(s);
+    function cerrar()
+        if ~isempty(lst)
+            delete(lst);
+            lst = [];
+        end
+        if ishghandle(ui.fig)
+            delete(ui.fig);
+        end
     end
 
     %% PROCESADO
     function capturar()
+        if ~ishghandle(hFig)
+            ui.estado('La figura original ya no existe.');
+            return
+        end
         frame = capturarFigura(hFig, opts, fuenteComic);
     end
 
@@ -208,9 +348,9 @@ function varargout = xkcdify(hFig, varargin)
         end
         t = tic;
         [result, ruido] = deformar(frame, opts, ruido);
-        imgResultado.ImageSource = im2uint8(result);
-        lblEstado.Text = sprintf('%d x %d px · semilla %d · %.0f ms', ...
-            size(result, 2), size(result, 1), opts.Semilla, 1000 * toc(t));
+        ui.imagen(result);
+        ui.estado(sprintf('%d x %d px · semilla %d · %.0f ms', ...
+            size(result, 2), size(result, 1), opts.Semilla, 1000 * toc(t)));
     end
 end
 
@@ -234,21 +374,20 @@ function [result, ruido] = deformar(frame, opts, ruido)
     % Borde blanco para que la deformación no corte los bordes
     % (fijo hasta 5 px de amplitud, para que el ruido no cambie de tamaño)
     pad = max(40, ceil(8 * opts.Amplitud));
-    imgPad = padarray(frame, [pad pad], 1, 'both');
-    [rows, cols, ~] = size(imgPad);
+    [alto, ancho, ~] = size(frame);
+    rows = alto + 2 * pad;
+    cols = ancho + 2 * pad;
+    imgPad = ones(rows, cols, 3);
+    imgPad(pad+1:pad+alto, pad+1:pad+ancho, :) = frame;
 
     if isempty(ruido) || ruido.Semilla ~= opts.Semilla || ~isequal(size(ruido.X), [rows cols])
-        s = RandStream('mt19937ar', 'Seed', opts.Semilla);
-        ruido.Semilla = opts.Semilla;
-        ruido.X = 2 * rand(s, rows, cols) - 1;
-        ruido.Y = 2 * rand(s, rows, cols) - 1;
+        [X0, Y0] = ruidoBase(opts.Semilla, rows, cols);
+        ruido = struct('Semilla', opts.Semilla, 'X', X0, 'Y', Y0);
     end
 
-    % Suavizar y normalizar para que la Amplitud sea en píxeles. Relleno
-    % circular: con 'replicate' (el defecto) el borde repetido crea
-    % desplazamientos enormes en la orilla.
-    smoothX = imgaussfilt(ruido.X, opts.Sigma, 'Padding', 'circular');
-    smoothY = imgaussfilt(ruido.Y, opts.Sigma, 'Padding', 'circular');
+    % Suavizar y normalizar para que la Amplitud sea en píxeles
+    smoothX = suavizar(ruido.X, opts.Sigma);
+    smoothY = suavizar(ruido.Y, opts.Sigma);
     dx = opts.Amplitud * smoothX / std(smoothX(:));
     dy = opts.Amplitud * smoothY / std(smoothY(:));
 
@@ -261,6 +400,69 @@ function [result, ruido] = deformar(frame, opts, ruido)
     end
 
     result = imgDistorted(pad+1:end-pad, pad+1:end-pad, :);
+end
+
+function [X, Y] = ruidoBase(semilla, rows, cols)
+% Ruido uniforme en [-1, 1] reproducible, sin tocar el generador global
+    if exist('RandStream', 'class')
+        s = RandStream('mt19937ar', 'Seed', semilla);
+        X = 2 * rand(s, rows, cols) - 1;
+        Y = 2 * rand(s, rows, cols) - 1;
+    else
+        % Octave: no hay RandStream; se guarda y restaura el estado global
+        estado = rand('state');
+        rand('state', semilla);
+        X = 2 * rand(rows, cols) - 1;
+        Y = 2 * rand(rows, cols) - 1;
+        rand('state', estado);
+    end
+end
+
+function S = suavizar(R, sigma)
+% Filtro gaussiano separable (radio 2*sigma) con relleno circular, sin
+% toolboxes. Con relleno 'replicate' el borde repetido crearía
+% desplazamientos enormes en la orilla.
+    r = ceil(2 * sigma);
+    g = exp(-(-r:r).^2 / (2 * sigma^2));
+    g = g / sum(g);
+    [rows, cols] = size(R);
+    ii = mod((1-r:rows+r) - 1, rows) + 1;
+    jj = mod((1-r:cols+r) - 1, cols) + 1;
+    S = conv2(g, g, R(ii, jj), 'valid');
+end
+
+function s = crearSlider(padre, lim, valor, paso, alSoltar, alArrastrar)
+% Slider clásico: alSoltar al soltar y alArrastrar mientras se arrastra
+% (ContinuousValueChange no existe en Octave: ahí solo se actualiza al soltar)
+    s = uicontrol('Parent', padre, 'Style', 'slider', 'Min', lim(1), 'Max', lim(2), ...
+        'Value', valor, 'SliderStep', paso / diff(lim), ...
+        'Callback', @(h,~) alSoltar(get(h, 'Value')));
+    try
+        addlistener(s, 'ContinuousValueChange', @(h,~) alArrastrar(get(h, 'Value')));
+    catch
+    end
+end
+
+function tf = hayUifigure()
+% uifigure con uislider, uigridlayout y uiimage('ScaleMethod'): R2021b+
+    if exist('OCTAVE_VERSION', 'builtin')
+        tf = false;
+    elseif exist('isMATLABReleaseOlderThan', 'file')
+        tf = ~isMATLABReleaseOlderThan('R2021b');
+    else
+        tf = false;   % anterior a R2020b
+    end
+end
+
+function nombre = nombreFigura(hFig)
+    nombre = get(hFig, 'Name');
+    if isempty(nombre)
+        try
+            nombre = sprintf('Figura %d', get(hFig, 'Number'));
+        catch
+            nombre = sprintf('Figura %d', double(hFig));   % Octave
+        end
+    end
 end
 
 function cambios = aplicarRetoques(hFig, opts, fuenteComic)
@@ -287,7 +489,9 @@ function cambios = aplicarRetoques(hFig, opts, fuenteComic)
         tipos = {'line', 'errorbar', 'stair', 'functionline', ...
             'implicitfunctionline', 'parameterizedfunctionline'};
         objs = findall(hFig, '-property', 'LineWidth');
-        objs = objs(ismember(arrayfun(@(o) o.Type, objs, 'UniformOutput', false), tipos));
+        if ~isempty(objs)
+            objs = objs(ismember(cellstr(get(objs, 'Type')), tipos));
+        end
         cambios = fijar(cambios, objs, 'LineWidth', @(v) max(v, opts.GrosorLineas));
     end
 end
@@ -319,7 +523,7 @@ function restaurarPropiedades(cambios)
 % Deshace los cambios en orden inverso, restaurando también los ...Mode
     for k = size(cambios, 1):-1:1
         [o, prop, valor, modo] = cambios{k, :};
-        if ~isvalid(o)
+        if ~ishghandle(o)
             continue
         end
         set(o, prop, valor);
@@ -332,7 +536,11 @@ end
 function nombre = buscarFuenteComic()
 % Primera fuente tipo cómic instalada ('' si no hay ninguna)
     candidatas = {'Humor Sans', 'xkcd Script', 'xkcd', 'Comic Neue', 'Comic Sans MS'};
-    disponibles = lower(listfonts);
+    try
+        disponibles = lower(listfonts);
+    catch
+        disponibles = {};   % Octave no tiene listfonts
+    end
     idx = find(ismember(lower(candidatas), disponibles), 1);
     if isempty(idx)
         nombre = '';

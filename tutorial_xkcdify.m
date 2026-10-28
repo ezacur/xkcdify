@@ -28,8 +28,10 @@
 % solo hace falta |xkcdify.m|; |demo_xkcdify.m| es un ejemplo rápido.
 
 %% Requisitos
-% * MATLAB R2021b o posterior (usa |uifigure|, |uislider| y |uiimage|).
-% * *Image Processing Toolbox* (|padarray| e |imgaussfilt|).
+% * MATLAB, sin ninguna toolbox.
+% * La interfaz moderna usa |uifigure| (R2021b o posterior). En versiones
+%   anteriores, en Octave o si |uifigure| falla, se usa automáticamente una
+%   interfaz clásica con |figure| y |uicontrol| (ver sección 2).
 % * Opcional: la fuente *Humor Sans*, la letra de xkcd. Si está instalada
 %   (para todos los usuarios, en |C:\Windows\Fonts|), |xkcdify| la usa
 %   automáticamente. Si no, prueba con xkcd Script, xkcd, Comic Neue y
@@ -85,6 +87,24 @@ title('Tres ondas');
 %
 %   hGui = xkcdify(hFig, 'Interfaz', true);
 
+%% 2.1 Interfaz clásica (fallback)
+% Si |uifigure| no está disponible (MATLAB anterior a R2021b u Octave) o
+% falla al crearse, |xkcdify| usa una |figure| clásica con
+% |uicontrol('Style','slider')|. Tiene los mismos controles y el mismo
+% comportamiento: los sliders se actualizan mientras arrastras gracias a
+% |addlistener(slider, 'ContinuousValueChange', ...)| (en Octave, que no
+% tiene ese evento, al soltar).
+%
+% <<xkcdify_gui_clasica.png>>
+%
+% Se puede forzar una u otra con |TipoInterfaz|:
+%
+%   xkcdify(hFig, 'TipoInterfaz', 'figure');     % clásica
+%   xkcdify(hFig, 'TipoInterfaz', 'uifigure');   % moderna (error si falla)
+%
+% La ventana clásica tiene |HandleVisibility = 'off'|, así que |gcf| y
+% |plot| nunca acaban dibujando en ella.
+
 %% 3. Sin interfaz: img = xkcdify(hFig)
 % Si se pide una salida, |xkcdify| no abre ninguna ventana: devuelve la
 % imagen RGB (|double| entre 0 y 1), del mismo tamaño que la figura.
@@ -113,6 +133,7 @@ imshow(img, 'Border', 'tight');
 % <tr><td>RetocarEjes</td><td>true</td><td>Engrosar los ejes y dibujarlos encima</td></tr>
 % <tr><td>Semilla</td><td>1</td><td>Semilla del ruido</td></tr>
 % <tr><td>Interfaz</td><td>según la salida</td><td>true abre la interfaz; por defecto, solo si no se pide salida</td></tr>
+% <tr><td>TipoInterfaz</td><td>'auto'</td><td>'uifigure', 'figure' (clásica) o 'auto' (uifigure si se puede)</td></tr>
 % </table>
 % </html>
 %
@@ -204,7 +225,10 @@ imshow(imgBar, 'Border', 'tight');
 %   bordes.
 % # *Campo de desplazamientos*: dos campos de ruido aleatorio (uno para X
 %   y otro para Y), suavizados con un filtro gaussiano de radio |Sigma| y
-%   normalizados para que su desviación típica sea |Amplitud| píxeles.
+%   normalizados para que su desviación típica sea |Amplitud| píxeles. El
+%   filtro es separable (|conv2|) con relleno circular: no hace falta
+%   ninguna toolbox, y el relleno circular evita desplazamientos enormes en
+%   la orilla (los que daría repetir el borde).
 % # *Deformar*: cada píxel se toma de su posición desplazada (|interp2|).
 % # *Recortar*: se quita el margen.
 %
@@ -214,7 +238,13 @@ imshow(imgBar, 'Border', 'tight');
 
 s = RandStream('mt19937ar', 'Seed', 1);
 ruido = 2 * rand(s, 420, 640) - 1;
-dx = imgaussfilt(ruido, 15, 'Padding', 'circular');
+sigma = 15;
+r = ceil(2 * sigma);
+g = exp(-(-r:r).^2 / (2 * sigma^2));
+g = g / sum(g);
+ii = mod(-r:419+r, 420) + 1;      % relleno circular
+jj = mod(-r:639+r, 640) + 1;
+dx = conv2(g, g, ruido(ii, jj), 'valid');
 dx = 1.2 * dx / std(dx(:));
 
 figuraNueva(640, 420);
